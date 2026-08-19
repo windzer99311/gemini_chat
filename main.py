@@ -1,10 +1,12 @@
-from flask import Flask, request, jsonify
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 import requests, json, re, urllib3, os
 import uuid
+import uvicorn
 from action_token import get_action_token
 from available_models import get_models
 
-app = Flask(__name__)
+app = FastAPI()
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 url = "https://gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate"
 params = {
@@ -170,16 +172,15 @@ def save_conv_state(conv_id, resp_id, cho_id):
         }, f, indent=4)
 
 
-# --- Flask API Routes ---
+# --- FastAPI Routes ---
 
-@app.route('/set_cookies', methods=['POST'])
-def api_set_cookies():
-    data = request.json
+@app.post('/set_cookies')
+def api_set_cookies(data: dict):
     psid = data.get("__Secure-1PSID")
     psidts = data.get("__Secure-1PSIDTS")
 
     if not psid or not psidts:
-        return jsonify({"success": False, "error": "Both __Secure-1PSID and __Secure-1PSIDTS are required"}), 400
+        return JSONResponse(status_code=400, content={"success": False, "error": "Both __Secure-1PSID and __Secure-1PSIDTS are required"})
 
     cookie_data = {
         "__Secure-1PSID": psid,
@@ -197,22 +198,21 @@ def api_set_cookies():
         action_token = get_action_token(session=session)
         models = get_models(session=session, action_token=action_token)
 
-        return jsonify({
+        return {
             "success": True,
             "message": "Cookies saved successfully.",
             "available_models": models
-        })
+        }
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 
-@app.route('/set_model', methods=['POST'])
-def api_set_model():
-    data = request.json
+@app.post('/set_model')
+def api_set_model(data: dict):
     model_hash = data.get("model_hash")
 
     if not model_hash:
-        return jsonify({"success": False, "error": "model_hash is required"}), 400
+        return JSONResponse(status_code=400, content={"success": False, "error": "model_hash is required"})
 
     model_data = {
         "model": model_hash
@@ -221,13 +221,11 @@ def api_set_model():
     with open("model.json", "w") as f:
         json.dump(model_data, f, indent=4)
 
-    return jsonify({"success": True, "message": "Model saved successfully to model.json"})
+    return {"success": True, "message": "Model saved successfully to model.json"}
 
 
-@app.route('/chat', methods=['POST'])
-def chat():
-    # Read input from the POST request body
-    data = request.json
+@app.post('/chat')
+def chat(data: dict):
     msg = data.get("message")
 
     # Check if we should continue previous chat (supports boolean True or string "true")
@@ -235,20 +233,20 @@ def chat():
     should_continue = str(prev_chat_cont).lower() == "true"
 
     if not msg:
-        return jsonify({"success": False, "error": "Message is required"}), 400
+        return JSONResponse(status_code=400, content={"success": False, "error": "Message is required"})
 
     session = requests.session()
 
     try:
         cookies = set_cookies()
     except FileNotFoundError:
-        return jsonify({"success": False, "error": "Cookies not found. Please use /set_cookies first."}), 400
+        return JSONResponse(status_code=400, content={"success": False, "error": "Cookies not found. Please use /set_cookies first."})
 
     try:
         with open("model.json", "r") as f:
             model_id = json.load(f)
     except FileNotFoundError:
-        return jsonify({"success": False, "error": "Model not found. Please use /set_model first."}), 400
+        return JSONResponse(status_code=400, content={"success": False, "error": "Model not found. Please use /set_model first."})
 
     selected_model = model_id.get("model")
     headers = get_header(selected_model)
@@ -257,8 +255,7 @@ def chat():
     try:
         action_token = get_action_token(session=session)
     except Exception as e:
-        return jsonify(
-            {"success": False, "error": f"Failed to get action token. Ensure cookies are valid. Error: {str(e)}"}), 500
+        return JSONResponse(status_code=500, content={"success": False, "error": f"Failed to get action token. Ensure cookies are valid. Error: {str(e)}"})
 
     session.headers.update(headers)
     language = "en-GB"
@@ -293,13 +290,13 @@ def chat():
     session.close()
 
     # Return as JSON API response
-    return jsonify({
+    return {
         "success": True,
         "text": get_details.get("text", ""),
         "image_urls": get_details.get("image_urls", []),
         "conversation_id": conversation_id
-    })
+    }
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    uvicorn.run(app, host="0.0.0.0", port=5000)
