@@ -1,3 +1,4 @@
-Flask
+json
 requests
 urllib3
+fastapi
